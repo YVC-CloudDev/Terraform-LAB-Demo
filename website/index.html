@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lab: Static Website on AWS S3 with Terraform</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="badge">Hands-On Lab</div>
+            <h1>Static Website on AWS S3 with Terraform</h1>
+            <p class="subtitle">Infrastructure as Code from zero to a live website</p>
+            <div class="meta">
+                <span>Duration: ~45 minutes</span>
+                <span>Level: Beginner</span>
+                <span>Stack: AWS · Terraform · HCL</span>
+            </div>
+        </div>
+    </header>
+
+    <nav class="toc">
+        <div class="container">
+            <strong>Contents:</strong>
+            <a href="#objectives">Objectives</a>
+            <a href="#prereqs">Prerequisites</a>
+            <a href="#iac">What is IaC?</a>
+            <a href="#credentials">AWS Credentials</a>
+            <a href="#part1">Part 1 — First Resource</a>
+            <a href="#part2">Part 2 — Static Website</a>
+            <a href="#cleanup">Cleanup</a>
+            <a href="#troubleshoot">Troubleshooting</a>
+        </div>
+    </nav>
+
+    <main class="container">
+
+        <section id="objectives" class="card intro">
+            <h2>Learning Objectives</h2>
+            <p>
+                By the end of this lab you will be able to:
+            </p>
+            <ul>
+                <li>Explain what Infrastructure as Code (IaC) is and why teams use it.</li>
+                <li>Author Terraform configuration in HCL and use the core workflow: <code>init</code> → <code>plan</code> → <code>apply</code> → <code>destroy</code>.</li>
+                <li>Provision an Amazon S3 bucket and configure it as a public static website.</li>
+                <li>Manage S3 public access blocks, bucket policies, and object uploads from Terraform.</li>
+                <li>Tear down all created resources cleanly to avoid AWS charges.</li>
+            </ul>
+            <div class="info-box">
+                <strong>Outcome:</strong> A live HTTPS-reachable static site you provisioned entirely from code — just like the page you are reading right now.
+            </div>
+        </section>
+
+        <section id="prereqs" class="card">
+            <h2>Prerequisites</h2>
+            <ul class="check-list">
+                <li><strong>Terraform CLI</strong> 1.5 or newer — <a href="https://developer.hashicorp.com/terraform/install" target="_blank">install guide</a></li>
+                <li><strong>AWS CLI v2</strong> configured locally — <a href="https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html" target="_blank">install guide</a></li>
+                <li><strong>Visual Studio Code</strong> with the HashiCorp Terraform extension (recommended)</li>
+                <li><strong>An AWS account</strong> with programmatic credentials (Access Key ID + Secret Access Key) and permission to manage S3</li>
+                <li>A terminal: PowerShell, bash, or zsh</li>
+            </ul>
+            <p>Verify your tooling:</p>
+<pre><code>terraform version
+aws --version</code></pre>
+        </section>
+
+        <section id="iac" class="card">
+            <h2>What is Infrastructure as Code?</h2>
+            <p>
+                Infrastructure as Code is the practice of defining cloud resources — networks, virtual machines, databases, storage — in
+                declarative configuration files that are checked into source control and applied by an automation tool.
+                Instead of clicking through a cloud console, you describe the desired end state and let the tool reconcile reality with that state.
+            </p>
+            <div class="info-box">
+                <strong>Why teams adopt IaC:</strong>
+                <ul>
+                    <li><strong>Repeatability:</strong> identical environments for dev, staging, and production.</li>
+                    <li><strong>Reviewability:</strong> infrastructure changes go through pull requests like any other code.</li>
+                    <li><strong>Auditability:</strong> Git history shows who changed what, when, and why.</li>
+                    <li><strong>Disaster recovery:</strong> rebuild an entire environment from code in minutes.</li>
+                    <li><strong>Cost control:</strong> destroy ephemeral environments when not in use.</li>
+                </ul>
+            </div>
+            <p>
+                <strong>Terraform</strong> by HashiCorp is the most widely adopted IaC tool. It uses a declarative language called
+                <strong>HCL</strong> (HashiCorp Configuration Language) and supports thousands of providers — AWS, Azure, GCP, Kubernetes,
+                GitHub, Datadog, and more — through a unified workflow.
+            </p>
+        </section>
+
+        <section id="credentials" class="card">
+            <h2>Configuring AWS Credentials</h2>
+            <p>Terraform needs AWS credentials to call the AWS APIs. Configure a named profile with the AWS CLI:</p>
+<pre><code>aws configure --profile lab</code></pre>
+            <p>You will be prompted for four values:</p>
+            <ul>
+                <li><code>AWS Access Key ID</code></li>
+                <li><code>AWS Secret Access Key</code></li>
+                <li><code>Default region name</code> — for this lab use <code>us-east-1</code></li>
+                <li><code>Default output format</code> — <code>json</code> is fine</li>
+            </ul>
+            <div class="warning-box">
+                <strong>Security:</strong> never commit credentials to Git. Terraform will read them from your AWS CLI profile or from
+                environment variables (<code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>) at runtime.
+            </div>
+            <p>Verify the profile works:</p>
+<pre><code>aws sts get-caller-identity --profile lab</code></pre>
+        </section>
+
+        <hr>
+
+        <section id="part1" class="card highlight">
+            <h2>Part 1 — Your First Terraform Resource</h2>
+            <p>
+                In this part you will create a single empty S3 bucket. The goal is to get familiar with the Terraform workflow
+                before adding more pieces.
+            </p>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">1</span>
+                <h2>Create a working directory</h2>
+            </div>
+<pre><code>mkdir aws-workshop
+cd aws-workshop</code></pre>
+            <p>Terraform treats every directory as an independent project with its own state. Keep each project isolated.</p>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">2</span>
+                <h2>Create main.tf</h2>
+            </div>
+            <p>Open VS Code in the current directory and create a file named <code>main.tf</code>:</p>
+<pre><code>code .</code></pre>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">3</span>
+                <h2>Declare the provider and a bucket</h2>
+            </div>
+            <p>Paste the following into <code>main.tf</code>. Replace the bucket name with something globally unique — S3 bucket names share a single namespace across all AWS accounts.</p>
+<pre><code>terraform {
+  required_version = "&gt;= 1.5.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region  = "us-east-1"
+  profile = "lab"
+}
+
+resource "aws_s3_bucket" "site" {
+  bucket = "yourname-tf-lab-2026"
+}</code></pre>
+            <div class="warning-box">
+                <strong>Naming rules:</strong> lowercase only, 3–63 characters, no underscores, and globally unique across AWS.
+                A good convention: <code>&lt;yourname&gt;-tf-lab-&lt;year&gt;</code>.
+            </div>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">4</span>
+                <h2>Run the Terraform workflow</h2>
+            </div>
+
+            <h3>terraform init</h3>
+            <p>Downloads the AWS provider plugin and initializes the working directory. Run this once per project, and again whenever you change providers.</p>
+<pre><code>terraform init</code></pre>
+
+            <h3>terraform fmt</h3>
+            <p>Rewrites your files into the canonical HCL style. Run before every commit.</p>
+<pre><code>terraform fmt</code></pre>
+
+            <h3>terraform validate</h3>
+            <p>Checks syntax and basic semantic errors without contacting AWS.</p>
+<pre><code>terraform validate</code></pre>
+
+            <h3>terraform plan</h3>
+            <p>Computes the diff between your configuration and the current real-world state. <strong>Always</strong> read the plan before applying.</p>
+<pre><code>terraform plan</code></pre>
+
+            <h3>terraform apply</h3>
+            <p>Executes the plan. Terraform prints the diff again and asks you to type <code>yes</code> to confirm.</p>
+<pre><code>terraform apply</code></pre>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">5</span>
+                <h2>Verify in AWS</h2>
+            </div>
+<pre><code>aws s3 ls --profile lab</code></pre>
+            <p>Your bucket should appear in the list. You can also open the S3 console in your browser to see it.</p>
+        </section>
+
+        <hr>
+
+        <section id="part2" class="card highlight">
+            <h2>Part 2 — Turn the Bucket Into a Website</h2>
+            <p>
+                An S3 bucket alone is just storage. To serve it as a public website we need four additional pieces:
+            </p>
+            <ol>
+                <li>An <code>index.html</code> file to serve.</li>
+                <li>A <strong>public access block</strong> configuration that allows public policies.</li>
+                <li>A <strong>bucket policy</strong> that grants anonymous read access.</li>
+                <li>A <strong>website configuration</strong> that designates the index document.</li>
+            </ol>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">6</span>
+                <h2>Create index.html</h2>
+            </div>
+            <p>In the same directory, create <code>index.html</code>:</p>
+<pre><code>&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+  &lt;meta charset="UTF-8"&gt;
+  &lt;title&gt;My Site&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1&gt;Hello from S3 + Terraform!&lt;/h1&gt;
+  &lt;p&gt;This page was deployed as code.&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">7</span>
+                <h2>Disable the public-access guardrail</h2>
+            </div>
+            <p>
+                By default, S3 blocks any policy that would expose objects publicly. Since we explicitly want a public website,
+                we need to relax this guardrail. Append to <code>main.tf</code>:
+            </p>
+<pre><code>resource "aws_s3_bucket_public_access_block" "site" {
+  bucket = aws_s3_bucket.site.id
+
+  block_public_acls       = false
+  block_public_policy     = false
+  ignore_public_acls      = false
+  restrict_public_buckets = false
+}</code></pre>
+            <div class="info-box">
+                <strong>Why the order matters:</strong> the public access block must exist <em>before</em> the bucket policy,
+                otherwise AWS rejects the policy as a public-access violation. Terraform handles this automatically because the
+                policy references the bucket — but be aware of the dependency.
+            </div>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">8</span>
+                <h2>Add a bucket policy for public read</h2>
+            </div>
+<pre><code>resource "aws_s3_bucket_policy" "site" {
+  bucket = aws_s3_bucket.site.id
+
+  depends_on = [aws_s3_bucket_public_access_block.site]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "PublicReadGetObject"
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "s3:GetObject"
+        Resource  = "${aws_s3_bucket.site.arn}/*"
+      }
+    ]
+  })
+}</code></pre>
+            <p>The <code>jsonencode</code> function lets us write the IAM policy as a native HCL object and converts it to JSON at apply time.</p>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">9</span>
+                <h2>Upload the HTML and enable website hosting</h2>
+            </div>
+<pre><code>resource "aws_s3_object" "index" {
+  bucket       = aws_s3_bucket.site.id
+  key          = "index.html"
+  source       = "index.html"
+  content_type = "text/html"
+  etag         = filemd5("index.html")
+}
+
+resource "aws_s3_bucket_website_configuration" "site" {
+  bucket = aws_s3_bucket.site.id
+
+  index_document {
+    suffix = "index.html"
+  }
+}
+
+output "website_url" {
+  description = "Public URL of the static website"
+  value       = "http://${aws_s3_bucket_website_configuration.site.website_endpoint}"
+}</code></pre>
+            <div class="info-box">
+                <strong>About <code>etag = filemd5(...)</code>:</strong> Terraform doesn't watch your local files. The <code>etag</code>
+                argument forces it to re-upload the object whenever the file content changes, so every <code>terraform apply</code> publishes the latest version.
+            </div>
+        </section>
+
+        <section class="card step">
+            <div class="step-header">
+                <span class="step-num">10</span>
+                <h2>Deploy and visit your site</h2>
+            </div>
+<pre><code>terraform apply</code></pre>
+            <p>After confirming with <code>yes</code>, Terraform prints the output:</p>
+<pre><code>Outputs:
+
+website_url = "http://yourname-tf-lab-2026.s3-website-us-east-1.amazonaws.com"</code></pre>
+            <p>Open the URL in your browser — your site is live. Edit <code>index.html</code>, run <code>terraform apply</code> again, and refresh: changes ship in seconds.</p>
+        </section>
+
+        <hr>
+
+        <section id="cleanup" class="card danger">
+            <h2>Cleanup — Don't Skip This</h2>
+            <p>
+                S3 storage and requests are billed. When you finish the lab, destroy everything you created:
+            </p>
+<pre><code>terraform destroy</code></pre>
+            <p>
+                Terraform shows you the full deletion plan and asks for confirmation. Type <code>yes</code> and every resource defined in your
+                configuration is removed. Verify with:
+            </p>
+<pre><code>aws s3 ls --profile lab</code></pre>
+            <p>The bucket should no longer appear.</p>
+        </section>
+
+        <section id="troubleshoot" class="card">
+            <h2>Troubleshooting</h2>
+
+            <h3><code>BucketAlreadyExists</code></h3>
+            <p>Someone — possibly you, in another region — already owns that bucket name. S3 bucket names are globally unique. Pick a new one.</p>
+
+            <h3><code>AccessDenied</code> when applying the bucket policy</h3>
+            <p>The public access block is still enforcing the restriction. Make sure <code>aws_s3_bucket_public_access_block</code> is in your configuration and that the policy <code>depends_on</code> it.</p>
+
+            <h3><code>NoSuchBucket</code> in the browser</h3>
+            <p>Wait 10–30 seconds after <code>terraform apply</code> — S3 DNS propagation is fast but not instant. Also confirm the endpoint matches the bucket region.</p>
+
+            <h3><code>403 Forbidden</code> on the website URL</h3>
+            <p>Three things to verify: (1) the bucket policy was applied successfully, (2) the public access block allows public policies, and (3) the object exists with the correct key (<code>index.html</code>, lowercase).</p>
+
+            <h3>Provider plugin errors after editing <code>main.tf</code></h3>
+            <p>Run <code>terraform init -upgrade</code> to refresh providers.</p>
+        </section>
+
+        <section class="card success">
+            <h2>What You Accomplished</h2>
+            <ul>
+                <li>Authored a complete Terraform configuration from scratch.</li>
+                <li>Used the full workflow: <code>init</code>, <code>fmt</code>, <code>validate</code>, <code>plan</code>, <code>apply</code>, <code>destroy</code>.</li>
+                <li>Provisioned an S3 bucket, configured static website hosting, and managed an IAM-style bucket policy.</li>
+                <li>Uploaded an object from Terraform with content-hash change detection.</li>
+                <li>Produced a publicly reachable URL — entirely from code, in source control.</li>
+            </ul>
+            <p>
+                Next steps to explore on your own: a custom domain via Route 53, HTTPS via CloudFront and ACM,
+                deployment automation with GitHub Actions, and remote state in an S3 backend with DynamoDB locking.
+            </p>
+        </section>
+
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>YVC · Infrastructure as Code · Lesson 9</p>
+        </div>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# Example: copy to terraform.tfvars and fill your values
+# DO NOT commit terraform.tfvars to git!
+
+aws_region  = "us-east-1"
+bucket_name = "YOUR-NAME-terraform-website-2024"
