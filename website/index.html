@@ -397,12 +397,24 @@ website_url = "http://yourname-tf-lab-2026.s3-website-us-east-1.amazonaws.com"</
       const ICON_OK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
       document.querySelectorAll('pre').forEach(function (pre) {
+        // Wrap the <pre> in a container and put the button in a header bar
+        // ABOVE it, so selecting the code with the mouse never includes the
+        // button text.
+        const wrapper = document.createElement('div');
+        wrapper.className = 'code-block';
+        const header = document.createElement('div');
+        header.className = 'code-header';
+
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'copy-btn';
         btn.setAttribute('aria-label', 'Copy code to clipboard');
         btn.innerHTML = ICON_COPY + '<span>Copy</span>';
-        pre.appendChild(btn);
+
+        header.appendChild(btn);
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(header);
+        wrapper.appendChild(pre);
 
         btn.addEventListener('click', async function () {
           const codeEl = pre.querySelector('code') || pre;
